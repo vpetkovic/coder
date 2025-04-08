@@ -3,6 +3,9 @@ terraform {
     coder = {
       source = "coder/coder"
     }
+    cloudinit = {
+      source = "hashicorp/cloudinit"
+    }
     digitalocean = {
       source = "digitalocean/digitalocean"
     }
@@ -316,12 +319,7 @@ resource "digitalocean_droplet" "workspace" {
   size   = data.coder_parameter.droplet_size.value
 
   volume_ids = [digitalocean_volume.home_volume.id]
-  user_data = templatefile("cloud-config.yaml.tftpl", {
-    username          = lower(data.coder_workspace_owner.me.name)
-    home_volume_label = digitalocean_volume.home_volume.initial_filesystem_label
-    init_script       = base64encode(coder_agent.main.init_script)
-    coder_agent_token = coder_agent.main.token
-  })
+  user_data = data.cloudinit_config.user_data.rendered
   # Required to provision Fedora.
   ssh_keys = var.ssh_key_id > 0 ? [var.ssh_key_id] : []
 }
@@ -357,5 +355,23 @@ resource "coder_metadata" "volume-info" {
   item {
     key   = "size"
     value = "${digitalocean_volume.home_volume.size} GiB"
+  }
+}
+
+data "cloudinit_config" "user_data" {
+  gzip          = false
+  base64_encode = true
+
+  boundary = "//"
+
+  part {
+    filename     = "cloud-config.yaml"
+    content_type = "text/cloud-config"
+
+    content = templatefile("${path.module}/cloud-init/cloud-config.yaml.tftpl", {
+      username    = "coder" # Ensure this user/group does not exist in your VM image
+      init_script = base64encode(coder_agent.main.init_script)
+      hostname    = lower(data.coder_workspace.me.name)
+    })
   }
 }
